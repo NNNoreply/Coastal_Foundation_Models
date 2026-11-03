@@ -1,0 +1,682 @@
+% Options for packages loaded elsewhere
+\PassOptionsToPackage{unicode}{hyperref}
+\PassOptionsToPackage{hyphens}{url}
+%
+\documentclass[
+  10pt,
+  english,
+]{article}
+\usepackage{amsmath,amssymb}
+\usepackage{lmodern}
+\usepackage{iftex}
+\ifPDFTeX
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \usepackage{textcomp} % provide euro and other symbols
+\else % if luatex or xetex
+  \usepackage{unicode-math}
+  \defaultfontfeatures{Scale=MatchLowercase}
+  \defaultfontfeatures[\rmfamily]{Ligatures=TeX,Scale=1}
+\fi
+% Use upquote if available, for straight quotes in verbatim environments
+\IfFileExists{upquote.sty}{\usepackage{upquote}}{}
+\IfFileExists{microtype.sty}{% use microtype if available
+  \usepackage[]{microtype}
+  \UseMicrotypeSet[protrusion]{basicmath} % disable protrusion for tt fonts
+}{}
+\makeatletter
+\@ifundefined{KOMAClassName}{% if non-KOMA class
+  \IfFileExists{parskip.sty}{%
+    \usepackage{parskip}
+  }{% else
+    \setlength{\parindent}{0pt}
+    \setlength{\parskip}{6pt plus 2pt minus 1pt}}
+}{% if KOMA class
+  \KOMAoptions{parskip=half}}
+\makeatother
+\usepackage{xcolor}
+\IfFileExists{xurl.sty}{\usepackage{xurl}}{} % add URL line breaks if available
+\IfFileExists{bookmark.sty}{\usepackage{bookmark}}{\usepackage{hyperref}}
+\hypersetup{
+  pdftitle={Coastal Representation Learning by Combining Optical and Depth Foundation Models},
+  pdflang={en},
+  hidelinks,
+  pdfcreator={LaTeX via pandoc}}
+\urlstyle{same} % disable monospaced font for URLs
+\usepackage[margin=0.85in]{geometry}
+\usepackage{longtable,booktabs,array}
+\usepackage{calc} % for calculating minipage widths
+% Correct order of tables after \paragraph or \subparagraph
+\usepackage{etoolbox}
+\makeatletter
+\patchcmd\longtable{\par}{\if@noskipsec\mbox{}\fi\par}{}{}
+\makeatother
+% Allow footnotes in longtable head/foot
+\IfFileExists{footnotehyper.sty}{\usepackage{footnotehyper}}{\usepackage{footnote}}
+\makesavenoteenv{longtable}
+\usepackage{graphicx}
+\makeatletter
+\def\maxwidth{\ifdim\Gin@nat@width>\linewidth\linewidth\else\Gin@nat@width\fi}
+\def\maxheight{\ifdim\Gin@nat@height>\textheight\textheight\else\Gin@nat@height\fi}
+\makeatother
+% Scale images if necessary, so that they will not overflow the page
+% margins by default, and it is still possible to overwrite the defaults
+% using explicit options in \includegraphics[width, height, ...]{}
+\setkeys{Gin}{width=\maxwidth,height=\maxheight,keepaspectratio}
+% Set default figure placement to htbp
+\makeatletter
+\def\fps@figure{htbp}
+\makeatother
+\setlength{\emergencystretch}{3em} % prevent overfull lines
+\providecommand{\tightlist}{%
+  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+\setcounter{secnumdepth}{-\maxdimen} % remove section numbering
+\ifXeTeX
+  % Load polyglossia as late as possible: uses bidi with RTL langages (e.g. Hebrew, Arabic)
+  \usepackage{polyglossia}
+  \setmainlanguage[]{english}
+\else
+  \usepackage[main=english]{babel}
+% get rid of language-specific shorthands (see #6817):
+\let\LanguageShortHands\languageshorthands
+\def\languageshorthands#1{}
+\fi
+\ifLuaTeX
+  \usepackage{selnolig}  % disable illegal ligatures
+\fi
+
+\title{Coastal Representation Learning by Combining Optical and Depth
+Foundation Models}
+\author{}
+\date{Working draft --- 3 November 2026}
+
+\begin{document}
+\maketitle
+
+\hypertarget{abstract}{%
+\section{Abstract}\label{abstract}}
+
+Coastal prediction combines spectral appearance, spatial context and
+geometric structure, but these signals are rarely provided by one
+pretrained encoder. We study a simple dual-foundation architecture that
+combines an optical Earth-observation model, OLMoEarth Large, with the
+visual encoder of PromptDA, a depth foundation model. Both encoders
+remain frozen: their spatial tokens are aligned and concatenated before
+a task-specific linear probe. The evaluation uses four downstream
+tasks---bathymetry regression and three segmentation benchmarks---under
+a common validation-selected probing protocol. On 1,150 coastal regions
+used for coastal adaptation experiments, the dual-foundation
+representation improves MARIDA mIoU from 0.6129 to 0.6384 and MADOS mIoU
+from 0.6480 to 0.6833 relative to OLMoEarth Large alone. Bathymetry
+changes from 0.5771 to 0.5749 m RMSE, whereas LICS decreases from 0.9548
+to 0.9431. We report OLMoEarth Nano adaptation and a task-adapted
+SpectralMoE implementation as controls that separate the dual-foundation
+result from additional coastal or target-task supervision. The results
+support optical--depth feature complementarity on selected coastal
+tasks, while the single-run design, larger concatenated probe and
+unmatched interfaces limit claims of general superiority.
+
+\hypertarget{introduction}{%
+\section{1. Introduction}\label{introduction}}
+
+Coastal prediction spans tasks with different information requirements.
+Shoreline delineation depends on boundaries, marine surface
+interpretation depends on spectral and contextual cues, and bathymetry
+requires continuous geometric estimates. Optical Earth-observation
+models are well matched to spectral variation, but a depth foundation
+model can provide a complementary bias toward scene layout and relative
+structure. The central question is whether these two pretrained
+representations can be combined without retraining either encoder.
+
+OLMoEarth provides a multimodal optical representation and a
+frozen-feature evaluation recipe {[}1{]}. PromptDA extends the Depth
+Anything line toward high-resolution metric-depth estimation {[}3{]};
+here we use its visual encoder features, not its depth predictions or
+depth prompts. Combining the two models is attractive because it adds a
+geometric representation without requiring paired depth labels in the
+coastal collection. The combination also creates practical questions
+about spatial alignment, feature dimensionality and whether any gain
+survives a frozen, task-independent evaluation.
+
+We investigate the dual-foundation design through a local evaluation
+study rather than new pretraining. We first establish ten
+pretrained-model references under a common probing budget. We then
+compare OLMoEarth Large alone with frozen OLMoEarth--PromptDA
+concatenation on four tasks. OLMoEarth Nano coastal adaptation and a
+separate transfer of the released SpectralMoE architecture {[}2{]}
+provide controls for the effects of coastal supervision and target-task
+adaptation. These controls are reported separately because they change
+the representation before linear probing.
+
+Our contribution is an explicit and reproducible baseline for combining
+optical and depth foundation-model features in coastal remote sensing.
+The method has three deliberately small operations: independent
+preprocessing, spatial-token alignment and channel concatenation,
+followed by a task-specific probe. The experiments show selected gains
+on marine-surface segmentation while exposing a trade-off on shoreline
+segmentation. We do not claim a new depth model, a new optical encoder
+or a new fusion primitive; the scientific claim is narrower: a frozen
+depth foundation model can complement an optical foundation model on
+some coastal transfers under the tested protocol.
+
+\hypertarget{data-and-evaluation-settings}{%
+\section{2. Data and evaluation
+settings}\label{data-and-evaluation-settings}}
+
+\hypertarget{coastal-adaptation-collection}{%
+\subsection{2.1. Coastal adaptation
+collection}\label{coastal-adaptation-collection}}
+
+We use 1,150 coastal regions selected from an existing collection for
+complete monthly records in Sentinel-2, Landsat, and MODIS during 2024.
+The split contains 911 training, 120 validation, and 119 held-out
+regions. Months from a region retain the same split membership. Complete
+monthly records do not imply that every pixel is valid; observation
+masks remain necessary.
+
+Sentinel-2 supplies 12 bands per time step. Landsat uses six scientific
+bands, organized through the existing input adapter. MODIS supplies
+seven bands on a native 5 by 5 grid, represented as 25 coarse tokens per
+time step. The optical training footprint spans approximately 2,560
+projected metres; the MODIS grid spans approximately 2,500 projected
+metres. MODIS is not upsampled to simulate fine spatial detail. The
+current experiments do not use Sentinel-1, although an archive audit
+found all 12 monthly Sentinel-1 records for 1,027 of the regions.
+
+Auxiliary supervision comprises shoreline labels from an existing JRC
+2020--2024 aggregation, GLC-FCS30D land-cover labels from 2022, a
+Copernicus GLO30 static surface-elevation product, and
+tide-model-derived monthly targets. The elevation product is a digital
+surface model, not underwater bathymetry, and its edition year does not
+imply acquisition in 2024. Spatial targets are aligned to a common
+origin and a 100 by 100 grid with 25.6 m spacing. Differences in source
+dates mean that these targets are not fully synchronous observations.
+
+The regions span approximately 47.08 degrees south to 51.93 degrees
+north. Europe and western Asia contribute 275 regions, North America
+245, Africa and the Middle East 232, South America 149, Oceania 146,
+East Asia and the northern Pacific 57, and southern and southeastern
+Asia 46. Thus, coverage is geographically broad but uneven. These
+regions have not yet undergone a spatial-overlap audit against
+downstream datasets or the foundation models' pretraining corpora.
+
+\begin{longtable}[]{@{}lrr@{}}
+\toprule
+Water fraction within valid JRC pixels & All regions & Training
+regions \\
+\midrule
+\endhead
+0\% & 150 & 121 \\
+More than 0\%, at most 25\% & 309 & 246 \\
+More than 25\%, less than 75\% & 320 & 250 \\
+At least 75\%, less than 100\% & 232 & 178 \\
+100\% & 139 & 116 \\
+Total & 1,150 & 911 \\
+\bottomrule
+\end{longtable}
+
+Table 1. Composition of aligned coastal labels. Fractions describe valid
+observed pixels, not the entire unmasked tile. All-water regions are not
+necessarily exclusively marine. Original sampling-footprint fractions
+differ from these cropped-label statistics.
+
+\hypertarget{downstream-tasks}{%
+\subsection{2.2. Downstream tasks}\label{downstream-tasks}}
+
+We evaluate MagicBathyNet bathymetry regression, LICS shoreline
+segmentation, MARIDA marine surface segmentation, and MADOS marine
+surface segmentation. Bathymetry is measured by root mean squared error
+(RMSE) in metres; segmentation is measured by mean intersection over
+union (mIoU). Dataset names identify the local benchmark inputs; our
+adaptations and splits should not be interpreted as a universal
+reproduction of published dataset leaderboards.
+
+\begin{longtable}[]{@{}lrrrl@{}}
+\toprule
+Benchmark & Train & Validation & Test & Metric \\
+\midrule
+\endhead
+MagicBathyNet & 2,030 & 226 & 566 & RMSE, lower is better \\
+LICS & 80 & 20 & 100 & mIoU, higher is better \\
+MARIDA & 694 & 328 & 359 & mIoU, higher is better \\
+MADOS & 2,657 & 1,186 & 1,311 & mIoU, higher is better \\
+\bottomrule
+\end{longtable}
+
+Table 2. Sample counts in the local evaluation manifests. LICS uses the
+first 80 samples of the local fine-tuning partition for training and the
+remaining 20 for validation. MagicBathyNet uses the existing stored
+split IDs; MARIDA and MADOS use the partitions exposed by their local
+loaders. Canonical dataset citations, acquisition details, and release
+identifiers must accompany a public release of these manifests.
+
+\hypertarget{linear-probing}{%
+\subsection{2.3. Linear probing}\label{linear-probing}}
+
+We freeze the feature extractor and train a fresh linear probe for each
+downstream task. Following the OLMoEarth evaluation design {[}1{]}, each
+trial runs for 50 epochs. The learning-rate candidates are 0.0001,
+0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, and 0.5. AdamW uses weight decay
+0.01, batch size 32, and five epochs of linear warmup followed by cosine
+decay towards 0.00001. Probe initialization uses seed 42. Validation
+selects the configuration after each 50-epoch trial; the selected
+configuration is then evaluated on the test split. Test scores do not
+select the learning rate or normalization.
+
+For OLMoEarth, the input patch size is four. We compare the official
+pretrained normalization statistics with benchmark statistics using the
+same mean-and-standard-deviation scaling. Most benchmark statistics are
+fitted on the training inputs; MADOS uses published statistics embedded
+in the existing evaluation implementation. The current tasks use
+single-time-step inputs. External models retain their native adapters
+and input-size requirements, so identical optimization budgets do not
+imply identical sensor information or preprocessing.
+
+For segmentation, a linear layer maps each spatial feature to class
+logits for its corresponding output patch; logits are resized to the
+original target grid when required. Cross-entropy ignores label 255 and
+does not use additional class weights. For regression, a single-channel
+1 by 1 convolution predicts bathymetry and minimizes mean squared error
+over valid pixels. Neither task uses the coastal multitask loss during
+probing. Features are extracted with BF16 autocast and stored in float16
+caches in the current implementation.
+
+\hypertarget{opticaldepth-dual-foundation-method-and-controls}{%
+\section{3. Optical--depth dual-foundation method and
+controls}\label{opticaldepth-dual-foundation-method-and-controls}}
+
+\hypertarget{official-checkpoint-references}{%
+\subsection{3.1. Official checkpoint
+references}\label{official-checkpoint-references}}
+
+We evaluate official OLMoEarth Nano and Large checkpoints alongside
+TerraMind, Prithvi EO-2.0, DOFA, SatMAE, CROMA, Scale-MAE, AnySat, and
+TESSERA. OLMoEarth Nano and Large emit 128- and 1,024-dimensional
+features, respectively. Several interfaces require sensor or band
+adaptation. Scale-MAE uses RGB, whereas the other adapters can use
+different spectral subsets. The present TESSERA experiment supplies a
+single optical observation with the existing temporal-bin adaptation and
+does not evaluate its full annual multimodal setting. Lower scores under
+these interfaces should not be taken as upper bounds on the underlying
+models' capabilities.
+
+\hypertarget{olmoearthpromptda-feature-fusion}{%
+\subsection{3.2. OLMoEarth--PromptDA feature
+fusion}\label{olmoearthpromptda-feature-fusion}}
+
+The primary method combines the official OLMoEarth Large optical encoder
+with the official PromptDA ViT-L depth foundation model {[}3{]}.
+OLMoEarth receives the optical bands through its native sensor adapter.
+PromptDA receives an RGB rendering of the same observation through its
+native image preprocessing. The two encoders are evaluated independently
+and remain frozen throughout feature extraction and probing.
+
+The OLMoEarth input is 256 by 256 with patch size four in the probing
+protocol. PromptDA receives 448 by 448 RGB inputs with its native patch
+size fourteen. Its 32 by 32 final normalized patch-token grid is
+bilinearly aligned with the OLMoEarth spatial grid. We concatenate the
+aligned channels:
+
+\[
+F_{\mathrm{dual}}=[F_{\mathrm{OLMoEarth}};\operatorname{Resize}(F_{\mathrm{PromptDA}})]\in\mathbb{R}^{H\times W\times 2048}.
+\]
+
+PromptDA contributes a representation learned for depth estimation; the
+fusion does not use predicted depth, ground-truth depth, a depth prompt,
+or a learned projection. The same two encoder weights are used for all
+four tasks. A fresh linear probe is trained on the concatenated
+features, so the reported dual-foundation result measures transfer of a
+task-independent representation. The concatenated probe has twice the
+feature width of the OLMoEarth-only probe, an acknowledged source of
+additional capacity.
+
+\hypertarget{coastal-adaptation-of-nano-as-a-control}{%
+\subsection{3.3. Coastal adaptation of Nano as a
+control}\label{coastal-adaptation-of-nano-as-a-control}}
+
+The no-MoE baseline retains the official Nano transformer and adds a
+native MODIS input adapter and coastal task heads. The training
+objective is
+
+\[
+L_{\mathrm{coast}}=L_{\mathrm{shore}}+1.6L_{\mathrm{landcover}}+0.1L_{\mathrm{elevation}}+0.5L_{\mathrm{tide}}.
+\]
+
+Shoreline uses binary cross-entropy, land cover uses cross-entropy, and
+elevation and tide use SmoothL1. Elevation targets use a signed
+logarithmic transformation in the coastal training implementation.
+Training runs for 40 epochs with batch size four and seed 42. The
+official parameters are frozen for the first three epochs, then updated
+at learning rate 0.000045; added modules use 0.0045. AdamW weight decay
+is 0.05. A separate coastal validation objective selects the checkpoint;
+it uses a 0.1 coefficient for mean tide and is not identical to the
+training objective.
+
+The Nano MoE variants use six experts with corrected Top-1 or Top-2
+routing and physical token coordinates. Coordinates encode token centres
+using each modality's pixel spacing and origin before common
+normalization. This changes relative spatial representation; it does not
+supply a new global location signal. Corrected Top-1 uses a
+straight-through gate because softmax over a single selected logit is
+constant. Load-balancing and expert-diversity penalties have
+coefficients 0.01 and 0.001, with a three-epoch diversity warmup.
+
+The unfrozen Top-1 and Top-2 runs use the coastal validation-selected
+epochs 39 and 30. In a separate experiment, the official Nano parameters
+remain frozen throughout training while added modules and heads are
+updated. These runs use seed 43 and BF16; we report their fixed epoch-40
+snapshots. Consequently, frozen versus unfrozen comparisons also differ
+in seed, precision, and checkpoint selection and are not isolated causal
+tests of freezing. Coastal training uses patch size eight, whereas
+downstream probing uses patch size four. Downstream inputs do not
+include paired MODIS, and the coastal task heads are discarded.
+
+\hypertarget{target-task-adapted-spectralmoe-as-a-secondary-control}{%
+\subsection{3.4. Target-task-adapted SpectralMoE as a secondary
+control}\label{target-task-adapted-spectralmoe-as-a-secondary-control}}
+
+We also adapt the released SpectralMoE architecture of Chen et
+al.~{[}2{]}, replacing its visual foundation model with OLMoEarth Large
+while retaining the PromptDA encoder and the released six-expert, Top-1
+adapter design. This is an implementation adaptation of prior work, not
+a newly introduced dual-gated MoE architecture. Visual inputs use 256 by
+256 with patch eight, and PromptDA uses 448 by 448 with patch fourteen.
+The interface aligns the spatial grids and averages the visual spectral
+groups as implemented.
+
+Each downstream task separately trains MoE and task-head parameters for
+20 epochs with the two foundation encoders frozen. Segmentation uses the
+adapted Mask2Former head; bathymetry uses a regression head and MSE. We
+then discard the task head, freeze the adapted encoder and MoE, and
+train a new linear probe. The representation has therefore already
+received target-task supervision before probing. The adapter weights
+differ by task, and these scores cannot be interpreted as those of a
+single task-independent foundation model. Interface adaptations and the
+retained author implementation also prevent claiming an exact
+reproduction of SpectralMoE's original benchmark recipe.
+
+\hypertarget{results}{%
+\section{4. Results}\label{results}}
+
+\begin{figure}
+\centering
+\includegraphics{transfer_comparison.png}
+\caption{Figure 1. Task profiles of official Nano, coastally adapted
+Nano without MoE, official OLMoEarth Large, and the frozen
+OLMoEarth--PromptDA dual-foundation representation. Values are final
+test metrics under the local linear-probing protocol; lower is better
+for RMSE and higher for mIoU. Bars start at zero. Each bar represents
+one run, without uncertainty estimates.}
+\end{figure}
+
+\hypertarget{official-models-provide-different-reference-points}{%
+\subsection{4.1. Official models provide different reference
+points}\label{official-models-provide-different-reference-points}}
+
+No official checkpoint leads all four local tasks (Table 3). TerraMind
+achieves the lowest bathymetry RMSE and highest MADOS mIoU in this
+group. Prithvi leads LICS, whereas Nano leads MARIDA. The contrast
+between Nano and Large on MARIDA cautions against treating encoder size
+as a reliable predictor of performance under the current sensor
+interfaces and probing configuration.
+
+\begin{longtable}[]{@{}lrrrr@{}}
+\toprule
+Official checkpoint & Magic RMSE & LICS mIoU & MARIDA mIoU & MADOS
+mIoU \\
+\midrule
+\endhead
+OLMoEarth Nano & 0.633355 & 0.955118 & \textbf{0.647160} & 0.565515 \\
+OLMoEarth Large & 0.577098 & 0.954755 & 0.612900 & 0.647969 \\
+TerraMind Base & \textbf{0.529318} & 0.959422 & 0.499219 &
+\textbf{0.716325} \\
+Prithvi EO-2.0 300M & 0.605855 & \textbf{0.968702} & 0.493729 &
+0.641364 \\
+DOFA ViT-Base & 0.677503 & 0.911565 & 0.413663 & 0.549592 \\
+SatMAE ViT-Base multispectral & 0.621436 & 0.955805 & 0.374972 &
+0.617544 \\
+CROMA Base & 1.397860 & 0.922307 & 0.198291 & 0.212326 \\
+Scale-MAE ViT-Large & 0.664649 & 0.709480 & 0.174337 & 0.333993 \\
+AnySat Base & 0.556970 & 0.442266 & 0.239017 & 0.222442 \\
+TESSERA v2 Medium & 0.698643 & 0.932338 & 0.365159 & 0.500293 \\
+\bottomrule
+\end{longtable}
+
+Table 3. Official checkpoints under local frozen probing. Bold marks the
+best value in each column. Input adaptations differ; these are local
+evaluation results rather than official reported model scores.
+
+\hypertarget{coastal-adaptation-changes-the-task-profile}{%
+\subsection{4.2. Coastal adaptation changes the task
+profile}\label{coastal-adaptation-changes-the-task-profile}}
+
+Coastal supervision improves the no-MoE Nano baseline on LICS by 1.46
+percentage points but reduces its MARIDA and MADOS scores by 13.96 and
+4.66 points, respectively (Table 4). Its bathymetry RMSE also increases.
+The combination of a shoreline gain and marine-task losses is consistent
+with specialization, but does not uniquely establish catastrophic
+forgetting: altered input handling, checkpoint selection, and patch-size
+transfer are alternative contributors.
+
+Keeping the official encoder frozen changes this trade-off. Fixed
+epoch-40 Top-1 adaptation yields bathymetry RMSE of 0.568042 m, a
+10.31\% reduction relative to the official Nano reference, while
+remaining below that reference on all three segmentation tasks. Top-2
+does not consistently dominate Top-1. We therefore report these variants
+as different task profiles, rather than identifying one as a generally
+better coastal foundation model.
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 8\tabcolsep) * \real{0.16}}
+  >{\raggedleft\arraybackslash}p{(\columnwidth - 8\tabcolsep) * \real{0.21}}
+  >{\raggedleft\arraybackslash}p{(\columnwidth - 8\tabcolsep) * \real{0.21}}
+  >{\raggedleft\arraybackslash}p{(\columnwidth - 8\tabcolsep) * \real{0.21}}
+  >{\raggedleft\arraybackslash}p{(\columnwidth - 8\tabcolsep) * \real{0.21}}@{}}
+\toprule
+Nano configuration & Magic RMSE & LICS mIoU & MARIDA mIoU & MADOS
+mIoU \\
+\midrule
+\endhead
+Official Nano & 0.633355 & 0.955118 & \textbf{0.647160} &
+\textbf{0.565515} \\
+Coastal adaptation, no MoE & 0.647476 & \textbf{0.969692} & 0.507578 &
+0.518878 \\
+Unfrozen, physical coordinates, Top-1 & 0.633957 & 0.961896 & 0.486897 &
+0.515103 \\
+Unfrozen, physical coordinates, Top-2 & 0.632331 & 0.962021 & 0.491778 &
+0.522514 \\
+Frozen, physical coordinates, Top-1, epoch 40 & 0.568042 & 0.935636 &
+0.540643 & 0.492267 \\
+Frozen, physical coordinates, Top-2, epoch 40 & \textbf{0.564655} &
+0.925591 & 0.537782 & 0.498283 \\
+\bottomrule
+\end{longtable}
+
+Table 4. Coastal adaptation and transfer. Frozen/unfrozen refers to the
+official encoder during coastal training; all feature extractors are
+frozen during downstream probing. The no-MoE encoder contains
+approximately 1.700 million parameters and the Nano MoE encoders
+approximately 2.274 million, excluding downstream heads.
+
+\hypertarget{optical-and-depth-foundation-features-are-complementary-on-two-marine-tasks}{%
+\subsection{4.3. Optical and depth foundation features are complementary
+on two marine
+tasks}\label{optical-and-depth-foundation-features-are-complementary-on-two-marine-tasks}}
+
+The frozen OLMoEarth--PromptDA dual-foundation representation improves
+MARIDA by 2.55 percentage points and MADOS by 3.54 points relative to
+OLMoEarth Large alone (Table 5). Bathymetry RMSE changes from 0.577098
+to 0.574892 m, while LICS decreases by 1.16 points. The dual-foundation
+score remains below the best reference in the full model survey on each
+task, including Nano on MARIDA and TerraMind on MADOS. The result
+nevertheless supports the specific method claim: features from a depth
+foundation model can complement an optical foundation model for selected
+marine transfers without target-task adaptation of either encoder.
+
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 10\tabcolsep) * \real{0.14}}
+  >{\raggedright\arraybackslash}p{(\columnwidth - 10\tabcolsep) * \real{0.14}}
+  >{\raggedleft\arraybackslash}p{(\columnwidth - 10\tabcolsep) * \real{0.18}}
+  >{\raggedleft\arraybackslash}p{(\columnwidth - 10\tabcolsep) * \real{0.18}}
+  >{\raggedleft\arraybackslash}p{(\columnwidth - 10\tabcolsep) * \real{0.18}}
+  >{\raggedleft\arraybackslash}p{(\columnwidth - 10\tabcolsep) * \real{0.18}}@{}}
+\toprule
+Large-based configuration & Before probing & Magic RMSE & LICS mIoU &
+MARIDA mIoU & MADOS mIoU \\
+\midrule
+\endhead
+Official OLMoEarth Large & No adaptation & 0.577098 & 0.954755 &
+0.612900 & 0.647969 \\
+OLMoEarth Large + PromptDA depth foundation & No adaptation & 0.574892 &
+0.943147 & 0.638368 & 0.683345 \\
+Large + PromptDA + SpectralMoE & 20 epochs on each target task &
+0.560616 & 0.954343 & 0.495718 & 0.594606 \\
+\bottomrule
+\end{longtable}
+
+Table 5. OLMoEarth-only, frozen optical--depth fusion, and
+target-task-adapted SpectralMoE settings. The last row has additional
+target-task supervision and uses patch eight rather than patch four. It
+is not a controlled test of MoE versus the dual-foundation method. The
+frozen dual-foundation combination contains approximately 612.139
+million parameters; the task-adapted MoE combination contains
+approximately 617.877 million, excluding unused depth prediction and
+downstream heads.
+
+The task-adapted MoE configuration does not recover the MARIDA or MADOS
+performance of the frozen optical--depth fusion, despite having received
+additional labels before probing. Differences in patch size, interface,
+head, and optimization preclude a causal claim that MoE is inferior.
+They do show why a dual-foundation method should first be compared with
+each frozen encoder and why target-task adaptation should not be
+conflated with complementary pretrained features.
+
+\hypertarget{discussion-preserving-representations-while-learning-coastal-corrections}{%
+\section{5. Discussion: preserving representations while learning
+coastal
+corrections}\label{discussion-preserving-representations-while-learning-coastal-corrections}}
+
+Together, the experiments support a focused interpretation of the
+dual-foundation method. OLMoEarth supplies optical and multispectral
+evidence, whereas PromptDA supplies a depth-oriented visual
+representation. Their frozen combination improves two marine-surface
+transfers, but the unchanged encoders do not guarantee gains on every
+task. The method therefore offers a low-supervision baseline for testing
+whether geometric priors learned outside remote sensing can complement
+optical Earth-observation features.
+
+A concrete next experiment is to learn a gated correction on top of the
+dual-foundation representation while preserving both original feature
+paths:
+
+\[
+F_{\mathrm{out}}=F_0+\alpha(x)\,\Delta(F_0,F_{\mathrm{aux}}).
+\]
+
+Here, both pretrained encoders can remain frozen, the residual output
+can start at zero, and a feature-preservation penalty can discourage
+unnecessary departures from the two pretrained representations. This is
+a proposed experiment, not a method validated in this paper, and
+residual gating and distillation are established design ideas rather
+than claimed inventions. Its testable question is whether coastal
+supervision can improve the dual-foundation representation without
+removing the MARIDA and MADOS gains observed under frozen probing. The
+minimum controls are OLMoEarth alone, PromptDA alone, frozen
+concatenation, a single-encoder adapter and a two-encoder adapter with
+matched training data and search budgets.
+
+Several boundaries affect interpretation. First, the reported
+configurations are single runs without confidence intervals; small
+differences, especially the 0.38\% bathymetry improvement from
+concatenation, should not be treated as established gains. Second,
+changes in data normalization, sensor mapping, and feature dimensions
+complicate cross-model ranking. Third, the coastal subset is
+geographically imbalanced and spatial overlap with evaluation data has
+not been audited. Fourth, PromptDA contributes features learned in a
+different domain; neither the use of its encoder nor improved scores
+proves that metric depth is the relevant information. Finally, four
+optical tasks do not cover sea-surface temperature, chlorophyll,
+sediment concentration, SAR performance, or full-year temporal
+reasoning.
+
+These boundaries suggest focused follow-up tests. A dimension-matched
+fusion control would test whether extra probe capacity explains part of
+the observed benefit. A learned projection or low-rank fusion would test
+whether channel concatenation is sufficient. Matched-seed and
+fixed-patch comparisons would separate preprocessing from encoder
+complementarity. Paired Sentinel-1 inputs could then assess whether the
+optical--depth combination remains useful when a second remote-sensing
+modality is added. None of these outcomes is assumed by the present
+study.
+
+\hypertarget{conclusion}{%
+\section{6. Conclusion}\label{conclusion}}
+
+In the evaluated coastal setting, combining OLMoEarth with a frozen
+depth foundation model provides complementary features for MARIDA and
+MADOS under a common linear-probing protocol. The same dual-foundation
+representation does not improve every task, and its larger probe and
+interface differences limit causal attribution. The result establishes a
+concrete baseline for optical--depth fusion in coastal remote sensing
+and motivates future learned fusion that preserves both pretrained
+feature paths.
+
+\hypertarget{data-code-and-manuscript-status}{%
+\section{Data, code, and manuscript
+status}\label{data-code-and-manuscript-status}}
+
+The project repository is
+\url{https://github.com/NNNoreply/Coastal_Foundation_Models}. Its
+initial release contains a project overview; code, model checkpoints,
+and data are not yet included. This working draft is based on existing
+local experiment records. Author names, affiliations, contact details,
+dataset permissions, and complete bibliographic metadata remain to be
+supplied before submission. Existing model and dataset creators retain
+attribution for their resources. AI assistance was used to organize and
+draft this manuscript from local code and result records; author
+verification of the submitted text and interpretations remains pending.
+
+\hypertarget{source-references}{%
+\section{Source references}\label{source-references}}
+
+The following are source pointers verified in the local repository
+documentation, not a completed bibliography. Canonical citations for
+every benchmark, model, geospatial product, optimizer, and proposed
+residual/distillation context remain to be added and checked before
+public submission.
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\tightlist
+\item
+  OLMoEarth project. Official model and evaluation implementation.
+  \url{https://github.com/allenai/olmoearth_pretrain}. The repository
+  links the original report at \url{https://arxiv.org/abs/2511.13655}.
+  Nano and Large in this study use different released model versions.
+\item
+  Xi Chen, Maojun Zhang, Yu Liu, and Shen Yan. \emph{Local Precise
+  Refinement: A Dual-Gated Mixture-of-Experts for Enhancing Foundation
+  Model Generalization against Spectral Shifts}. arXiv:2603.13352, 2026.
+  \url{https://arxiv.org/abs/2603.13352}. Implementation:
+  \url{https://github.com/daxichen/SpectralMoE-main}. Author/title
+  metadata follow the released repository citation.
+\item
+  Haotong Lin et al.~\emph{Prompting Depth Anything for 4K Resolution
+  Accurate Metric Depth Estimation}. arXiv, 2024.
+  \url{https://promptda.github.io/}. The experiment uses the released
+  PromptDA ViT-L visual encoder checkpoint.
+\item
+  \emph{CROMA: Remote Sensing Representations with Contrastive
+  Radar-Optical Masked Autoencoders}. Paper linked in the local official
+  implementation: \url{https://arxiv.org/abs/2311.00566}.
+\item
+  SatMAE project and paper, linked in the local official implementation:
+  \url{https://sustainlab-group.github.io/SatMAE/} and
+  \url{https://arxiv.org/abs/2207.08051}.
+\item
+  \emph{Scale-MAE: A Scale-Aware Masked Autoencoder for Multiscale
+  Geospatial Representation Learning}. Paper linked in the local
+  implementation: \url{https://arxiv.org/abs/2212.14532}.
+\end{enumerate}
+
+\end{document}
